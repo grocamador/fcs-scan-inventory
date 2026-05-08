@@ -23,7 +23,7 @@ Unified tool to query and report on cloud infrastructure inventory, including ru
 ## Installation
 
 ```bash
-pip install falconpy
+python3 -m pip install crowdstrike-falconpy
 ```
 
 ## Usage
