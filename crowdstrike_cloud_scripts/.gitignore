@@ -1,0 +1,5 @@
+# Generated reports - excluded from version control
+*.txt
+*.json
+*_report*
+*.csv
