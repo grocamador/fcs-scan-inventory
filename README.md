@@ -57,13 +57,13 @@ export FALCON_CLIENT_ID="your_client_id"
 export FALCON_CLIENT_SECRET="your_client_secret"
 export FALCON_BASE_URL="https://api.eu-1.crowdstrike.com"
 
-python inventory_unified.py
+python3 inventory_unified.py
 ```
 
 ### With command-line arguments
 
 ```bash
-python inventory_unified.py \
+python3 inventory_unified.py \
   --client-id YOUR_CLIENT_ID \
   --client-secret YOUR_CLIENT_SECRET
 ```
@@ -71,7 +71,7 @@ python inventory_unified.py \
 ### Save report to file
 
 ```bash
-python inventory_unified.py -o inventory_report.txt
+python3 inventory_unified.py -o inventory_report.txt
 ```
 
 This generates two files:
@@ -81,13 +81,13 @@ This generates two files:
 ### Different API region
 
 ```bash
-python inventory_unified.py --region us-1 -o report.txt
+python3 inventory_unified.py --region us-1 -o report.txt
 ```
 
 ### Verbose output
 
 ```bash
-python inventory_unified.py -v
+python3 inventory_unified.py -v
 ```
 
 ## Output

@@ -6,6 +6,11 @@ Combines running instances and Kubernetes managed nodes detection in a single re
 
 import os
 import sys
+import warnings
+
+os.environ["PYTHONWARNINGS"] = "ignore::DeprecationWarning"
+warnings.filterwarnings("ignore")
+
 import argparse
 import json
 from falconpy import CloudSecurityAssets
@@ -110,23 +115,15 @@ def query_azure_vmss(cs: CloudSecurityAssets) -> Dict:
     print("🔍 Querying Azure VMSS...")
 
     results = {
-        "vmss_active": 0,
-        "vmss_all": 0
+        "vmss_active": 0
     }
 
     try:
-        # All Azure VMSS
-        vmss_filter = 'service:"Virtual Machine Scale Set"'
+        # Active Azure VMSS only
+        vmss_filter = 'service:"Virtual Machine Scale Set"+active:"true"'
         vmss_result = cs.query_assets(filter=vmss_filter, limit=1)
         if vmss_result.get("status_code") == 200:
-            results["vmss_all"] = vmss_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
-            print(f"  ✓ Azure VMSS (Total): {results['vmss_all']}")
-
-        # Active Azure VMSS
-        vmss_active_filter = 'service:"Virtual Machine Scale Set"+active:"true"'
-        vmss_active_result = cs.query_assets(filter=vmss_active_filter, limit=1)
-        if vmss_active_result.get("status_code") == 200:
-            results["vmss_active"] = vmss_active_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+            results["vmss_active"] = vmss_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
             print(f"  ✓ Azure VMSS (Active): {results['vmss_active']}")
 
         return results
@@ -172,15 +169,14 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 ┌─ AZURE VMSS (Virtual Machine Scale Sets) ───────────────────────────┐
 │                                                                      │
-│  VMSS (Active):        {vmss['vmss_active']:>6} scale sets
-│  VMSS (Total):        {vmss['vmss_all']:>6} scale sets
+│  Active VMSS:          {vmss['vmss_active']:>6} scale sets
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
 Summary:
   • {total_k8s} out of {total_running} instances are Kubernetes managed
   • {unmanaged} instances are not managed by Kubernetes
-  • {vmss['vmss_active']} active Azure VMSS out of {vmss['vmss_all']} total
+  • {vmss['vmss_active']} active Azure VMSS
 """
 
     if output_file:
@@ -197,8 +193,7 @@ Summary:
                 "total_k8s_managed": total_k8s,
                 "unmanaged_instances": unmanaged,
                 "k8s_percentage": round(k8s_percentage, 1),
-                "azure_vmss_active": vmss['vmss_active'],
-                "azure_vmss_total": vmss['vmss_all']
+                "azure_vmss_active": vmss['vmss_active']
             }
         }
         json_file = output_file.replace(".txt", ".json")
