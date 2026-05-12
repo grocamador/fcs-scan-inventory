@@ -18,13 +18,35 @@ Unified tool to query and report on cloud infrastructure inventory, including ru
 
 - Python 3.8+
 - `falconpy` SDK installed
-- Valid CrowdStrike API credentials
+- Valid CrowdStrike API credentials with `cloud-security-assets:read` scope
 
 ## Installation
 
 ```bash
 python3 -m pip install crowdstrike-falconpy
 ```
+
+## API Credentials Setup
+
+### Creating an API Key
+
+1. Log in to your CrowdStrike Falcon console
+2. Navigate to **Support and resources** → **API Clients and Keys**
+3. Click **Add API Client**
+4. Fill in the following details:
+   - **Client Name**: (e.g., "Cloud Inventory Tool")
+   - **Client Type**: Select your preferred type
+5. Under **API Scopes**, add the required scope:
+   - `cloud-security-assets:read`
+6. Click **Add** to create the API client
+7. Save your **Client ID** and **Client Secret** securely
+
+### API Credentials Requirements
+
+Ensure your CrowdStrike API credentials have the following permissions:
+- `cloud-security-assets:read` - Required to query cloud assets inventory
+
+For production use, store credentials securely using environment variables or secrets management tools.
 
 ## Usage
 
@@ -93,13 +115,6 @@ Generated: 2026-05-08 10:30:45
 │  Total Running:        226 instances
 ...
 ```
-
-## API Credentials
-
-Ensure your CrowdStrike API credentials have the following permissions:
-- `cloud-security-assets:read`
-
-For production use, store credentials securely using environment variables or secrets management tools.
 
 ## Troubleshooting
 
