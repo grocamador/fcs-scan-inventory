@@ -147,7 +147,7 @@ def generate_report(instances: Dict, k8s_nodes: Dict, aks: Dict, output_file: st
 
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-┌─ RUNNING INSTANCES ─────────────────────────────────────────────────┐
+┌─ RUNNING INSTANCES (Standalone + Kubernetes nodes) ─────────────────┐
 │                                                                      │
 │  AWS EC2:              {instances['ec2']:>6} instances
 │  GCP Compute:          {instances['gcp']:>6} instances
@@ -157,7 +157,7 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
-┌─ KUBERNETES MANAGED NODES ──────────────────────────────────────────┐
+┌─ RUNNING KUBERNETES MANAGED NODES ──────────────────────────────────┐
 │                                                                      │
 │  EKS Nodes (AWS):      {k8s_nodes['eks']:>6} nodes
 │  GKE Nodes (GCP):      {k8s_nodes['gke']:>6} nodes
