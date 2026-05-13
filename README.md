@@ -20,7 +20,7 @@ Unified tool to query and report on cloud infrastructure inventory across AWS, G
 
 - Python 3.8+
 - `falconpy` SDK installed
-- Valid CrowdStrike API credentials with `cloud-security-assets:read` scope
+- Valid CrowdStrike API credentials with `Cloud Security API Assets : read` scope
 
 ## Installation
 
@@ -39,14 +39,14 @@ python3 -m pip install crowdstrike-falconpy
    - **Client Name**: (e.g., "Cloud Inventory Tool")
    - **Client Type**: Select your preferred type
 5. Under **API Scopes**, add the required scope:
-   - `cloud-security-assets:read`
+   - `Cloud Security API Assets : read`
 6. Click **Add** to create the API client
 7. Save your **Client ID** and **Client Secret** securely
 
 ### API Credentials Requirements
 
 Ensure your CrowdStrike API credentials have the following permissions:
-- `cloud-security-assets:read` - Required to query cloud assets inventory
+- `Cloud Security API Assets : read` - Required to query cloud assets inventory
 
 For production use, store credentials securely using environment variables or secrets management tools.
 
@@ -190,7 +190,7 @@ echo $FALCON_CLIENT_ID
 echo $FALCON_CLIENT_SECRET
 ```
 
-Ensure your API client has the `cloud-security-assets:read` scope. Check the [API Credentials Setup](#api-credentials-setup) section above.
+Ensure your API client has the `Cloud Security API Assets : read` scope. Check the [API Credentials Setup](#api-credentials-setup) section above.
 
 ### No Results
 
