@@ -133,7 +133,30 @@ def query_azure_vmss(cs: CloudSecurityAssets) -> Dict:
         sys.exit(1)
 
 
-def generate_report(instances: Dict, k8s_nodes: Dict, vmss: Dict, output_file: str = None) -> str:
+def query_aks_nodes(cs: CloudSecurityAssets) -> Dict:
+    """Query for AKS managed nodes in Azure VMSS."""
+    print("🔍 Querying Azure AKS nodes...")
+
+    results = {
+        "aks_nodes": 0
+    }
+
+    try:
+        # AKS nodes have aks-managed-orchestrator tag
+        aks_filter = 'resource_type_name:"Virtual Machine Scale Sets Virtual Machines"+tag_key:"aks-managed-orchestrator"'
+        aks_result = cs.query_assets(filter=aks_filter, limit=1)
+        if aks_result.get("status_code") == 200:
+            results["aks_nodes"] = aks_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+            print(f"  ✓ AKS nodes found: {results['aks_nodes']}")
+
+        return results
+
+    except Exception as e:
+        print(f"❌ Error querying AKS nodes: {e}")
+        sys.exit(1)
+
+
+def generate_report(instances: Dict, k8s_nodes: Dict, vmss: Dict, aks: Dict, output_file: str = None) -> str:
     """Generate unified inventory report."""
     total_running = instances["total"]
     total_k8s = k8s_nodes["total"]
@@ -161,9 +184,10 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 │                                                                      │
 │  EKS Nodes (AWS):      {k8s_nodes['eks']:>6} nodes
 │  GKE Nodes (GCP):      {k8s_nodes['gke']:>6} nodes
+│  AKS Nodes (Azure):    {aks['aks_nodes']:>6} nodes
 │  ───────────────────────────────────                               │
-│  Total K8s Managed:    {total_k8s:>6} nodes ({k8s_percentage:.1f}%)
-│  Unmanaged Instances:  {unmanaged:>6} nodes ({100 - k8s_percentage:.1f}%)
+│  Total K8s Managed:    {total_k8s + aks['aks_nodes']:>6} nodes
+│  Unmanaged Instances:  {unmanaged:>6} nodes
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
@@ -174,7 +198,8 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 └─────────────────────────────────────────────────────────────────────┘
 
 Summary:
-  • {total_k8s} out of {total_running} instances are Kubernetes managed
+  • {total_k8s + aks['aks_nodes']} out of {total_running} instances are Kubernetes managed
+  • {aks['aks_nodes']} AKS nodes in Azure VMSS
   • {unmanaged} instances are not managed by Kubernetes
   • {vmss['vmss_active']} active Azure VMSS
 """
@@ -187,12 +212,15 @@ Summary:
             "timestamp": datetime.now().isoformat(),
             "instances": instances,
             "k8s_nodes": k8s_nodes,
+            "aks_nodes": aks,
             "vmss": vmss,
             "summary": {
                 "total_running": total_running,
-                "total_k8s_managed": total_k8s,
+                "total_k8s_managed": total_k8s + aks['aks_nodes'],
+                "eks_nodes": k8s_nodes['eks'],
+                "gke_nodes": k8s_nodes['gke'],
+                "aks_nodes": aks['aks_nodes'],
                 "unmanaged_instances": unmanaged,
-                "k8s_percentage": round(k8s_percentage, 1),
                 "azure_vmss_active": vmss['vmss_active']
             }
         }
@@ -260,9 +288,10 @@ Examples:
 
     instances = query_running_instances(cs)
     k8s_nodes = query_k8s_nodes(cs)
+    aks = query_aks_nodes(cs)
     vmss = query_azure_vmss(cs)
 
-    report = generate_report(instances, k8s_nodes, vmss, args.output)
+    report = generate_report(instances, k8s_nodes, vmss, aks, args.output)
     print(report)
 
 
