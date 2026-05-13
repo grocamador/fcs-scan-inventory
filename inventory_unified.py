@@ -43,9 +43,7 @@ def query_running_instances(cs: CloudSecurityAssets) -> Dict[str, int]:
     instances = {
         "ec2": 0,
         "gcp": 0,
-        "azure_vms": 0,
-        "azure_vmss_vms": 0,
-        "azure_total": 0,
+        "azure": 0,
         "total": 0
     }
 
@@ -64,22 +62,14 @@ def query_running_instances(cs: CloudSecurityAssets) -> Dict[str, int]:
             instances["gcp"] = gcp_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
             print(f"  ✓ GCP instances running: {instances['gcp']}")
 
-        # Azure regular VMs
+        # Azure instances (regular VMs only)
         azure_filter = 'service:"Virtual Machines"+instance_state:"VM running"'
         azure_result = cs.query_assets(filter=azure_filter, limit=1)
         if azure_result.get("status_code") == 200:
-            instances["azure_vms"] = azure_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
-            print(f"  ✓ Azure VMs running: {instances['azure_vms']}")
+            instances["azure"] = azure_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+            print(f"  ✓ Azure VMs running: {instances['azure']}")
 
-        # Azure VMSS Virtual Machines
-        vmss_vms_filter = 'resource_type_name:"Virtual Machine Scale Sets Virtual Machines"'
-        vmss_vms_result = cs.query_assets(filter=vmss_vms_filter, limit=1)
-        if vmss_vms_result.get("status_code") == 200:
-            instances["azure_vmss_vms"] = vmss_vms_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
-            print(f"  ✓ Azure VMSS VMs: {instances['azure_vmss_vms']}")
-
-        instances["azure_total"] = instances["azure_vms"] + instances["azure_vmss_vms"]
-        instances["total"] = instances["ec2"] + instances["gcp"] + instances["azure_total"]
+        instances["total"] = instances["ec2"] + instances["gcp"] + instances["azure"]
         return instances
 
     except Exception as e:
@@ -160,7 +150,7 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 │                                                                      │
 │  AWS EC2:              {instances['ec2']:>6} instances
 │  GCP Compute:          {instances['gcp']:>6} instances
-│  Azure VMs:            {instances['azure_total']:>6} instances
+│  Azure VMs:            {instances['azure']:>6} instances
 │  ───────────────────────────────────                               │
 │  Total Running:        {total_running:>6} instances
 │                                                                      │
