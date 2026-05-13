@@ -139,7 +139,6 @@ def generate_report(instances: Dict, k8s_nodes: Dict, aks: Dict, output_file: st
     azure_total = instances["azure"] + aks["aks_nodes"]
     total_running = instances["ec2"] + instances["gcp"] + azure_total
     total_k8s = k8s_nodes["total"] + aks["aks_nodes"]
-    unmanaged = total_running - total_k8s
 
     report = f"""
 ╔══════════════════════════════════════════════════════════════════════╗
@@ -165,14 +164,12 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 │  AKS Nodes (Azure):    {aks['aks_nodes']:>6} nodes
 │  ───────────────────────────────────                               │
 │  Total K8s Managed:    {total_k8s:>6} nodes
-│  Unmanaged Instances:  {unmanaged:>6} instances
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
 Summary:
-  • {total_k8s} out of {total_running} instances are Kubernetes managed
+  • {total_k8s} Kubernetes managed nodes
   • EKS: {k8s_nodes['eks']} | GKE: {k8s_nodes['gke']} | AKS: {aks['aks_nodes']} nodes
-  • {unmanaged} instances are unmanaged
 """
 
     if output_file:
@@ -190,8 +187,7 @@ Summary:
                 "total_k8s_managed": total_k8s,
                 "eks_nodes": k8s_nodes['eks'],
                 "gke_nodes": k8s_nodes['gke'],
-                "aks_nodes": aks['aks_nodes'],
-                "unmanaged_instances": unmanaged
+                "aks_nodes": aks['aks_nodes']
             }
         }
         json_file = output_file.replace(".txt", ".json")
