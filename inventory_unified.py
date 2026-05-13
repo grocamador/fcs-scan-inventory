@@ -135,7 +135,9 @@ def query_aks_nodes(cs: CloudSecurityAssets) -> Dict:
 
 def generate_report(instances: Dict, k8s_nodes: Dict, aks: Dict, output_file: str = None) -> str:
     """Generate unified inventory report."""
-    total_running = instances["total"]
+    # Azure total includes regular VMs + AKS nodes
+    azure_total = instances["azure"] + aks["aks_nodes"]
+    total_running = instances["ec2"] + instances["gcp"] + azure_total
     total_k8s = k8s_nodes["total"] + aks["aks_nodes"]
     unmanaged = total_running - total_k8s
 
@@ -150,7 +152,7 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 │                                                                      │
 │  AWS EC2:              {instances['ec2']:>6} instances
 │  GCP Compute:          {instances['gcp']:>6} instances
-│  Azure VMs:            {instances['azure']:>6} instances
+│  Azure VMs:            {azure_total:>6} instances
 │  ───────────────────────────────────                               │
 │  Total Running:        {total_running:>6} instances
 │                                                                      │
@@ -180,6 +182,7 @@ Summary:
         json_data = {
             "timestamp": datetime.now().isoformat(),
             "instances": instances,
+            "azure_total": azure_total,
             "k8s_nodes": k8s_nodes,
             "aks_nodes": aks,
             "summary": {
