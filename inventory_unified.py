@@ -139,6 +139,7 @@ def generate_report(instances: Dict, k8s_nodes: Dict, aks: Dict, output_file: st
     azure_total = instances["azure"] + aks["aks_nodes"]
     total_running = instances["ec2"] + instances["gcp"] + azure_total
     total_k8s = k8s_nodes["total"] + aks["aks_nodes"]
+    total_standalone = total_running - total_k8s
 
     report = f"""
 ╔══════════════════════════════════════════════════════════════════════╗
@@ -168,8 +169,10 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 └─────────────────────────────────────────────────────────────────────┘
 
 Summary:
-  • {total_k8s} Kubernetes managed nodes
-  • EKS: {k8s_nodes['eks']} | GKE: {k8s_nodes['gke']} | AKS: {aks['aks_nodes']} nodes
+  • Total of {total_running} instances
+  • {total_k8s} running as Kubernetes nodes
+  • {total_standalone} running standalone
+  • Breakdown: EKS {k8s_nodes['eks']} | GKE {k8s_nodes['gke']} | AKS {aks['aks_nodes']}
 """
 
     if output_file:
@@ -185,6 +188,7 @@ Summary:
             "summary": {
                 "total_running": total_running,
                 "total_k8s_managed": total_k8s,
+                "total_standalone": total_standalone,
                 "eks_nodes": k8s_nodes['eks'],
                 "gke_nodes": k8s_nodes['gke'],
                 "aks_nodes": aks['aks_nodes']
