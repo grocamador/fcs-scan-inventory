@@ -80,6 +80,34 @@ This generates two files:
 - `inventory_report.txt` - Formatted text report
 - `inventory_report.json` - Machine-readable JSON data
 
+### Export assets to CSV
+
+```bash
+# Export all assets to CSV
+python3 inventory_unified.py -e -o report.txt
+
+# This generates:
+# - report.txt (text report)
+# - report.json (JSON data)
+# - report.csv (asset details)
+```
+
+CSV includes columns:
+- `asset_name` - Instance/VM name
+- `asset_id` - Cloud provider resource ID
+- `asset_type` - AWS EC2, GCP Compute, Azure VM, etc.
+- `region` - Cloud region
+- `managed_by` - Sensor status (Sensor, Unmanaged, Snapshot, etc.)
+- `is_kubernetes_node` - Yes/No flag for K8s managed nodes
+
+### Export only unmanaged assets
+
+```bash
+python3 inventory_unified.py -e --unmanaged-only -o unmanaged.txt
+
+# Generates unmanaged.csv with only assets not managed by Falcon sensor
+```
+
 ### Different API region
 
 ```bash
@@ -179,6 +207,16 @@ When saving to file with `-o report.txt`, an additional JSON file (`report.json`
   }
 }
 ```
+
+## Performance
+
+The script uses threading to parallelize API queries across all cloud providers, significantly improving execution time:
+
+- **Running instances queries** - 3 parallel queries (EC2, GCP, Azure)
+- **Kubernetes nodes queries** - 2 parallel queries (EKS, GKE)
+- **Sensor status queries** - 6 parallel queries (EC2 VMs, EKS nodes, GCP VMs, GKE nodes, Azure VMs, AKS nodes)
+
+**Typical execution time:** 2:40 - 3:00 (depending on number of assets and network latency)
 
 ## Troubleshooting
 
