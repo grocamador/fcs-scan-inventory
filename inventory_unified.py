@@ -13,9 +13,11 @@ warnings.filterwarnings("ignore")
 
 import argparse
 import json
+import csv
 from falconpy import CloudSecurityAssets
 from typing import Dict, Tuple
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def get_credentials(client_id: str = None, client_secret: str = None, base_url: str = None) -> Dict[str, str]:
@@ -47,34 +49,42 @@ def query_running_instances(cs: CloudSecurityAssets) -> Dict[str, int]:
         "total": 0
     }
 
-    try:
-        # EC2 instances
+    def get_ec2():
         ec2_filter = 'service:"EC2"+instance_state:"running"'
         ec2_result = cs.query_assets(filter=ec2_filter, limit=1)
         if ec2_result.get("status_code") == 200:
-            instances["ec2"] = ec2_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
-            print(f"  ✓ EC2 running: {instances['ec2']}")
+            return ec2_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+        return 0
 
-        # GCP instances
+    def get_gcp():
         gcp_filter = 'resource_type_name:"Compute Instance"+instance_state:"RUNNING"'
         gcp_result = cs.query_assets(filter=gcp_filter, limit=1)
         if gcp_result.get("status_code") == 200:
-            instances["gcp"] = gcp_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
-            print(f"  ✓ GCP instances running: {instances['gcp']}")
+            return gcp_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+        return 0
 
-        # Azure instances (regular VMs only)
+    def get_azure():
         azure_filter = 'service:"Virtual Machines"+instance_state:"VM running"'
         azure_result = cs.query_assets(filter=azure_filter, limit=1)
         if azure_result.get("status_code") == 200:
-            instances["azure"] = azure_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
-            print(f"  ✓ Azure VMs running: {instances['azure']}")
+            return azure_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+        return 0
 
-        instances["total"] = instances["ec2"] + instances["gcp"] + instances["azure"]
-        return instances
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        ec2_future = executor.submit(get_ec2)
+        gcp_future = executor.submit(get_gcp)
+        azure_future = executor.submit(get_azure)
 
-    except Exception as e:
-        print(f"❌ Error querying instances: {e}")
-        sys.exit(1)
+        instances["ec2"] = ec2_future.result()
+        instances["gcp"] = gcp_future.result()
+        instances["azure"] = azure_future.result()
+
+    print(f"  ✓ EC2 running: {instances['ec2']}")
+    print(f"  ✓ GCP instances running: {instances['gcp']}")
+    print(f"  ✓ Azure VMs running: {instances['azure']}")
+
+    instances["total"] = instances["ec2"] + instances["gcp"] + instances["azure"]
+    return instances
 
 
 def query_k8s_nodes(cs: CloudSecurityAssets) -> Dict:
@@ -87,95 +97,172 @@ def query_k8s_nodes(cs: CloudSecurityAssets) -> Dict:
         "total": 0
     }
 
-    try:
-        # EKS nodes
-        eks_filter = 'service:"EC2"+instance_state:"running"+tag_key:"eks:cluster-name"'
+    def get_eks():
+        eks_filter = 'service:"EC2"+instance_state:"running"+tag_key:"aws:eks:cluster-name"'
         eks_result = cs.query_assets(filter=eks_filter, limit=1)
         if eks_result.get("status_code") == 200:
-            results["eks"] = eks_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
-            print(f"  ✓ EKS nodes found: {results['eks']}")
+            return eks_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+        return 0
 
-        # GKE nodes
+    def get_gke():
         gke_filter = 'resource_type_name:"Compute Instance"+instance_state:"RUNNING"+tag_key:"goog-k8s-cluster-name"'
         gke_result = cs.query_assets(filter=gke_filter, limit=1)
         if gke_result.get("status_code") == 200:
-            results["gke"] = gke_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
-            print(f"  ✓ GKE nodes found: {results['gke']}")
+            return gke_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+        return 0
 
-        results["total"] = results["eks"] + results["gke"]
-        return results
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        eks_future = executor.submit(get_eks)
+        gke_future = executor.submit(get_gke)
 
-    except Exception as e:
-        print(f"❌ Error querying K8s nodes: {e}")
-        sys.exit(1)
+        results["eks"] = eks_future.result()
+        results["gke"] = gke_future.result()
+
+    print(f"  ✓ EKS nodes found: {results['eks']}")
+    print(f"  ✓ GKE nodes found: {results['gke']}")
+
+    results["total"] = results["eks"] + results["gke"]
+    return results
 
 
-def query_sensor_installation(cs: CloudSecurityAssets) -> Dict[str, Dict[str, int]]:
-    """Query for Managed by Sensor status across cloud providers."""
-    print("🔍 Querying Managed by Sensor status...")
+def query_sensor_installation(cs: CloudSecurityAssets) -> Dict:
+    """Query for Sensor Crowdstrike installation status across cloud providers, differentiating VMs and K8s nodes."""
+    print("🔍 Querying Sensor Crowdstrike installation status...")
 
     results = {
-        "ec2": {"managed": 0, "unmanaged": 0},
-        "gcp": {"managed": 0, "unmanaged": 0},
-        "azure": {"managed": 0, "unmanaged": 0},
+        "ec2_vms": {"installed": 0, "not_installed": 0},
+        "ec2_eks": {"installed": 0, "not_installed": 0},
+        "gcp_vms": {"installed": 0, "not_installed": 0},
+        "gcp_gke": {"installed": 0, "not_installed": 0},
+        "azure_vms": {"installed": 0, "not_installed": 0},
+        "azure_aks": {"installed": 0, "not_installed": 0},
     }
 
-    try:
-        # EC2 instances with managed status
+    def query_with_pagination(filter_str, resource_key):
+        """Helper to query with pagination and count sensor installation."""
+        counts = {"installed": 0, "not_installed": 0}
+        offset = 0
+        while True:
+            result = cs.query_assets(filter=filter_str, limit=100, offset=offset)
+            if result.get("status_code") != 200:
+                break
+            resource_ids = result.get("body", {}).get("resources", [])
+            if not resource_ids:
+                break
+
+            details = cs.cloud_security_assets_entities_get(ids=resource_ids)
+            if details.get("status_code") == 200:
+                assets = details.get("body", {}).get("resources", [])
+                for asset in assets:
+                    managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
+                    if managed_by == "Sensor":
+                        counts["installed"] += 1
+                    else:
+                        counts["not_installed"] += 1
+
+            total = result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+            offset += 100
+            if offset >= total:
+                break
+
+        return counts
+
+    def query_eks_nodes():
+        eks_filter = 'service:"EC2"+instance_state:"running"+tag_key:"aws:eks:cluster-name"'
+        return query_with_pagination(eks_filter, "ec2_eks")
+
+    def query_ec2_vms():
         ec2_filter = 'service:"EC2"+instance_state:"running"'
-        ec2_result = cs.query_assets(filter=ec2_filter, limit=100)
-        if ec2_result.get("status_code") == 200:
+        ec2_counts = {"installed": 0, "not_installed": 0}
+        offset = 0
+        while True:
+            ec2_result = cs.query_assets(filter=ec2_filter, limit=100, offset=offset)
+            if ec2_result.get("status_code") != 200:
+                break
             resource_ids = ec2_result.get("body", {}).get("resources", [])
-            if resource_ids:
-                details = cs.cloud_security_assets_entities_get(ids=resource_ids)
-                if details.get("status_code") == 200:
-                    assets = details.get("body", {}).get("resources", [])
-                    for asset in assets:
-                        managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
-                        if managed_by == "Managed":
-                            results["ec2"]["managed"] += 1
-                        else:
-                            results["ec2"]["unmanaged"] += 1
-                    print(f"  ✓ EC2: {results['ec2']['managed']} managed, {results['ec2']['unmanaged']} unmanaged")
+            if not resource_ids:
+                break
 
-        # GCP instances with managed status
+            details = cs.cloud_security_assets_entities_get(ids=resource_ids)
+            if details.get("status_code") == 200:
+                assets = details.get("body", {}).get("resources", [])
+                for asset in assets:
+                    managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
+                    is_eks = 'aws:eks:cluster-name' in asset.get('cloud_context', {}).get('tags', {})
+                    if not is_eks:
+                        if managed_by == "Sensor":
+                            ec2_counts["installed"] += 1
+                        else:
+                            ec2_counts["not_installed"] += 1
+
+            total = ec2_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+            offset += 100
+            if offset >= total:
+                break
+        return ec2_counts
+
+    def query_gke_nodes():
+        gke_filter = 'resource_type_name:"Compute Instance"+instance_state:"RUNNING"+tag_key:"goog-k8s-cluster-name"'
+        return query_with_pagination(gke_filter, "gcp_gke")
+
+    def query_gcp_vms():
         gcp_filter = 'resource_type_name:"Compute Instance"+instance_state:"RUNNING"'
-        gcp_result = cs.query_assets(filter=gcp_filter, limit=100)
-        if gcp_result.get("status_code") == 200:
+        gcp_counts = {"installed": 0, "not_installed": 0}
+        offset = 0
+        while True:
+            gcp_result = cs.query_assets(filter=gcp_filter, limit=100, offset=offset)
+            if gcp_result.get("status_code") != 200:
+                break
             resource_ids = gcp_result.get("body", {}).get("resources", [])
-            if resource_ids:
-                details = cs.cloud_security_assets_entities_get(ids=resource_ids)
-                if details.get("status_code") == 200:
-                    assets = details.get("body", {}).get("resources", [])
-                    for asset in assets:
-                        managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
-                        if managed_by == "Managed":
-                            results["gcp"]["managed"] += 1
-                        else:
-                            results["gcp"]["unmanaged"] += 1
-                    print(f"  ✓ GCP: {results['gcp']['managed']} managed, {results['gcp']['unmanaged']} unmanaged")
+            if not resource_ids:
+                break
 
-        # Azure instances with managed status
-        azure_filter = 'service:"Virtual Machines"+instance_state:"VM running"'
-        azure_result = cs.query_assets(filter=azure_filter, limit=100)
-        if azure_result.get("status_code") == 200:
-            resource_ids = azure_result.get("body", {}).get("resources", [])
-            if resource_ids:
-                details = cs.cloud_security_assets_entities_get(ids=resource_ids)
-                if details.get("status_code") == 200:
-                    assets = details.get("body", {}).get("resources", [])
-                    for asset in assets:
-                        managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
-                        if managed_by == "Managed":
-                            results["azure"]["managed"] += 1
+            details = cs.cloud_security_assets_entities_get(ids=resource_ids)
+            if details.get("status_code") == 200:
+                assets = details.get("body", {}).get("resources", [])
+                for asset in assets:
+                    managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
+                    is_gke = 'goog-k8s-cluster-name' in asset.get('cloud_context', {}).get('tags', {})
+                    if not is_gke:
+                        if managed_by == "Sensor":
+                            gcp_counts["installed"] += 1
                         else:
-                            results["azure"]["unmanaged"] += 1
-                    print(f"  ✓ Azure: {results['azure']['managed']} managed, {results['azure']['unmanaged']} unmanaged")
+                            gcp_counts["not_installed"] += 1
+
+            total = gcp_result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+            offset += 100
+            if offset >= total:
+                break
+        return gcp_counts
+
+    def query_azure_aks():
+        aks_filter = 'resource_type_name:"Virtual Machine Scale Sets Virtual Machines"+tag_key:"aks-managed-orchestrator"'
+        return query_with_pagination(aks_filter, "azure_aks")
+
+    def query_azure_vms():
+        azure_filter = 'service:"Virtual Machines"+instance_state:"VM running"'
+        return query_with_pagination(azure_filter, "azure_vms")
+
+    try:
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            eks_future = executor.submit(query_eks_nodes)
+            ec2_future = executor.submit(query_ec2_vms)
+            gke_future = executor.submit(query_gke_nodes)
+            gcp_future = executor.submit(query_gcp_vms)
+            aks_future = executor.submit(query_azure_aks)
+            azure_future = executor.submit(query_azure_vms)
+
+            results["ec2_eks"] = eks_future.result()
+            results["ec2_vms"] = ec2_future.result()
+            results["gcp_gke"] = gke_future.result()
+            results["gcp_vms"] = gcp_future.result()
+            results["azure_aks"] = aks_future.result()
+            results["azure_vms"] = azure_future.result()
 
         return results
 
     except Exception as e:
-        print(f"❌ Error querying Managed by Sensor status: {e}")
+        print(f"❌ Error querying Sensor installation status: {e}")
         sys.exit(1)
 
 
@@ -188,7 +275,6 @@ def query_aks_nodes(cs: CloudSecurityAssets) -> Dict:
     }
 
     try:
-        # AKS nodes have aks-managed-orchestrator tag
         aks_filter = 'resource_type_name:"Virtual Machine Scale Sets Virtual Machines"+tag_key:"aks-managed-orchestrator"'
         aks_result = cs.query_assets(filter=aks_filter, limit=1)
         if aks_result.get("status_code") == 200:
@@ -210,6 +296,14 @@ def generate_report(instances: Dict, k8s_nodes: Dict, aks: Dict, sensor: Dict, o
     total_running = instances["ec2"] + instances["gcp"] + azure_total
     total_k8s = k8s_nodes["total"] + aks["aks_nodes"]
     total_standalone = total_running - total_k8s
+
+    # Calculate sensor totals
+    total_vms_installed = sensor["ec2_vms"]["installed"] + sensor["gcp_vms"]["installed"] + sensor["azure_vms"]["installed"]
+    total_vms_not_installed = sensor["ec2_vms"]["not_installed"] + sensor["gcp_vms"]["not_installed"] + sensor["azure_vms"]["not_installed"]
+    total_nodes_installed = sensor["ec2_eks"]["installed"] + sensor["gcp_gke"]["installed"] + sensor["azure_aks"]["installed"]
+    total_nodes_not_installed = sensor["ec2_eks"]["not_installed"] + sensor["gcp_gke"]["not_installed"] + sensor["azure_aks"]["not_installed"]
+    total_all_installed = total_vms_installed + total_nodes_installed
+    total_all_not_installed = total_vms_not_installed + total_nodes_not_installed
 
     report = f"""
 ╔══════════════════════════════════════════════════════════════════════╗
@@ -238,22 +332,30 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
-┌─ MANAGED BY SENSOR ─────────────────────────────────────────────────┐
-│                                                                      │
-│  AWS EC2:              {sensor['ec2']['managed']:>6} managed,   {sensor['ec2']['unmanaged']:>6} unmanaged
-│  GCP Compute:          {sensor['gcp']['managed']:>6} managed,   {sensor['gcp']['unmanaged']:>6} unmanaged
-│  Azure VMs:            {sensor['azure']['managed']:>6} managed,   {sensor['azure']['unmanaged']:>6} unmanaged
-│  ───────────────────────────────────                               │
-│  Total:                {sensor['ec2']['managed'] + sensor['gcp']['managed'] + sensor['azure']['managed']:>6} managed,   {sensor['ec2']['unmanaged'] + sensor['gcp']['unmanaged'] + sensor['azure']['unmanaged']:>6} unmanaged
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-
 Summary:
   • Total of {total_running} instances
   • {total_k8s} running as Kubernetes nodes
   • {total_standalone} running standalone
   • Breakdown: EKS {k8s_nodes['eks']} | GKE {k8s_nodes['gke']} | AKS {aks['aks_nodes']}
-  • Managed by Sensor: {sensor['ec2']['managed'] + sensor['gcp']['managed'] + sensor['azure']['managed']} managed, {sensor['ec2']['unmanaged'] + sensor['gcp']['unmanaged'] + sensor['azure']['unmanaged']} unmanaged
+
+┌─ SENSOR CROWDSTRIKE INSTALLED ──────────────────────────────────────┐
+│                                                                      │
+│  Type          Installed  Not Installed                             │
+│  ──────────────────────────────────────                             │
+│  VMs:          {total_vms_installed:>9} {total_vms_not_installed:>13}
+│  Nodes:        {total_nodes_installed:>9} {total_nodes_not_installed:>13}
+│  ──────────────────────────────────────                             │
+│  Total:        {total_all_installed:>9} {total_all_not_installed:>13}
+│                                                                      │
+│  Breakdown by Cloud:                                                │
+│  • AWS EC2 VMs:       {sensor['ec2_vms']['installed']:>6} installed, {sensor['ec2_vms']['not_installed']:>6} not installed
+│  • AWS EKS Nodes:     {sensor['ec2_eks']['installed']:>6} installed, {sensor['ec2_eks']['not_installed']:>6} not installed
+│  • GCP VMs:           {sensor['gcp_vms']['installed']:>6} installed, {sensor['gcp_vms']['not_installed']:>6} not installed
+│  • GCP GKE Nodes:     {sensor['gcp_gke']['installed']:>6} installed, {sensor['gcp_gke']['not_installed']:>6} not installed
+│  • Azure VMs:         {sensor['azure_vms']['installed']:>6} installed, {sensor['azure_vms']['not_installed']:>6} not installed
+│  • Azure AKS Nodes:   {sensor['azure_aks']['installed']:>6} installed, {sensor['azure_aks']['not_installed']:>6} not installed
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
 """
 
     if output_file:
@@ -274,8 +376,12 @@ Summary:
                 "eks_nodes": k8s_nodes['eks'],
                 "gke_nodes": k8s_nodes['gke'],
                 "aks_nodes": aks['aks_nodes'],
-                "sensor_managed": sensor['ec2']['managed'] + sensor['gcp']['managed'] + sensor['azure']['managed'],
-                "sensor_unmanaged": sensor['ec2']['unmanaged'] + sensor['gcp']['unmanaged'] + sensor['azure']['unmanaged']
+                "vms_with_sensor": total_vms_installed,
+                "vms_without_sensor": total_vms_not_installed,
+                "nodes_with_sensor": total_nodes_installed,
+                "nodes_without_sensor": total_nodes_not_installed,
+                "total_with_sensor": total_all_installed,
+                "total_without_sensor": total_all_not_installed
             }
         }
         json_file = output_file.replace(".txt", ".json")
@@ -286,6 +392,192 @@ Summary:
         print(f"   • {json_file}")
 
     return report
+
+
+def export_assets_csv(cs: CloudSecurityAssets, output_file: str, unmanaged_only: bool = False) -> None:
+    """Export all cloud assets to CSV with sensor and K8s node information."""
+    filter_label = "unmanaged " if unmanaged_only else ""
+    print(f"📊 Exporting {filter_label}assets to CSV: {output_file}")
+
+    csv_file = output_file.replace(".txt", ".csv") if output_file.endswith(".txt") else output_file + ".csv"
+
+    def process_assets_batch(assets, cloud_type, is_k8s=False, k8s_type=None):
+        """Process a batch of assets and return list of rows."""
+        rows = []
+        for asset in assets:
+            managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
+
+            if unmanaged_only and managed_by == "Sensor":
+                continue
+
+            name = asset.get('resource_name', 'N/A')
+            asset_id = asset.get('resource_id', 'N/A')
+            region = asset.get('region', 'N/A')
+
+            if is_k8s:
+                is_node = "Yes"
+            else:
+                is_node = "No"
+
+            rows.append({
+                'asset_name': name,
+                'asset_id': asset_id,
+                'asset_type': cloud_type,
+                'region': region,
+                'managed_by': managed_by,
+                'is_kubernetes_node': is_node
+            })
+        return rows
+
+    def query_cloud_type(filter_str, cloud_type, is_k8s=False, k8s_type=None):
+        """Query and process a cloud type with pagination."""
+        all_rows = []
+        offset = 0
+        while True:
+            result = cs.query_assets(filter=filter_str, limit=100, offset=offset)
+            if result.get("status_code") != 200:
+                break
+            resource_ids = result.get("body", {}).get("resources", [])
+            if not resource_ids:
+                break
+
+            details = cs.cloud_security_assets_entities_get(ids=resource_ids)
+            if details.get("status_code") == 200:
+                assets = details.get("body", {}).get("resources", [])
+                rows = process_assets_batch(assets, cloud_type, is_k8s, k8s_type)
+                all_rows.extend(rows)
+
+            total = result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+            offset += 100
+            if offset >= total:
+                break
+
+        return all_rows
+
+    def query_ec2_vms_and_eks():
+        """Query EC2 and separate VMs from EKS."""
+        all_rows = []
+        ec2_filter = 'service:"EC2"+instance_state:"running"'
+        offset = 0
+        while True:
+            result = cs.query_assets(filter=ec2_filter, limit=100, offset=offset)
+            if result.get("status_code") != 200:
+                break
+            resource_ids = result.get("body", {}).get("resources", [])
+            if not resource_ids:
+                break
+
+            details = cs.cloud_security_assets_entities_get(ids=resource_ids)
+            if details.get("status_code") == 200:
+                assets = details.get("body", {}).get("resources", [])
+                for asset in assets:
+                    managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
+
+                    if unmanaged_only and managed_by == "Sensor":
+                        continue
+
+                    name = asset.get('resource_name', 'N/A')
+                    asset_id = asset.get('resource_id', 'N/A')
+                    region = asset.get('region', 'N/A')
+
+                    is_eks = 'aws:eks:cluster-name' in asset.get('cloud_context', {}).get('tags', {})
+                    is_node = "Yes" if is_eks else "No"
+
+                    all_rows.append({
+                        'asset_name': name,
+                        'asset_id': asset_id,
+                        'asset_type': 'AWS EC2',
+                        'region': region,
+                        'managed_by': managed_by,
+                        'is_kubernetes_node': is_node
+                    })
+
+            total = result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+            offset += 100
+            if offset >= total:
+                break
+
+        return all_rows
+
+    def query_gcp_vms_and_gke():
+        """Query GCP and separate VMs from GKE."""
+        all_rows = []
+        gcp_filter = 'resource_type_name:"Compute Instance"+instance_state:"RUNNING"'
+        offset = 0
+        while True:
+            result = cs.query_assets(filter=gcp_filter, limit=100, offset=offset)
+            if result.get("status_code") != 200:
+                break
+            resource_ids = result.get("body", {}).get("resources", [])
+            if not resource_ids:
+                break
+
+            details = cs.cloud_security_assets_entities_get(ids=resource_ids)
+            if details.get("status_code") == 200:
+                assets = details.get("body", {}).get("resources", [])
+                for asset in assets:
+                    managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
+
+                    if unmanaged_only and managed_by == "Sensor":
+                        continue
+
+                    name = asset.get('resource_name', 'N/A')
+                    asset_id = asset.get('resource_id', 'N/A')
+                    region = asset.get('region', 'N/A')
+
+                    is_gke = 'goog-k8s-cluster-name' in asset.get('cloud_context', {}).get('tags', {})
+                    is_node = "Yes" if is_gke else "No"
+
+                    all_rows.append({
+                        'asset_name': name,
+                        'asset_id': asset_id,
+                        'asset_type': 'GCP Compute',
+                        'region': region,
+                        'managed_by': managed_by,
+                        'is_kubernetes_node': is_node
+                    })
+
+            total = result.get("body", {}).get("meta", {}).get("pagination", {}).get("total", 0)
+            offset += 100
+            if offset >= total:
+                break
+
+        return all_rows
+
+    try:
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            ec2_future = executor.submit(query_ec2_vms_and_eks)
+            gcp_future = executor.submit(query_gcp_vms_and_gke)
+            azure_future = executor.submit(query_cloud_type, 'service:"Virtual Machines"+instance_state:"VM running"', 'Azure VM', False)
+
+            all_rows = []
+            all_rows.extend(ec2_future.result())
+            all_rows.extend(gcp_future.result())
+            all_rows.extend(azure_future.result())
+
+            # Query AKS nodes
+            aks_rows = query_cloud_type(
+                'resource_type_name:"Virtual Machine Scale Sets Virtual Machines"+tag_key:"aks-managed-orchestrator"',
+                'Azure AKS Node',
+                is_k8s=True,
+                k8s_type='AKS'
+            )
+            all_rows.extend(aks_rows)
+
+        # Write to CSV
+        if all_rows:
+            with open(csv_file, 'w', newline='') as f:
+                fieldnames = ['asset_name', 'asset_id', 'asset_type', 'region', 'managed_by', 'is_kubernetes_node']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(all_rows)
+            print(f"✓ CSV saved: {csv_file} ({len(all_rows)} assets)")
+        else:
+            print("⚠ No assets found to export")
+
+    except Exception as e:
+        print(f"❌ Error exporting CSV: {e}")
+        sys.exit(1)
 
 
 def main():
@@ -313,6 +605,8 @@ Examples:
     parser.add_argument("--client-secret", help="CrowdStrike API Client Secret")
     parser.add_argument("--region", default="", help="API Region (e.g., us-1, eu-1)")
     parser.add_argument("-o", "--output", help="Save report to file")
+    parser.add_argument("-e", "--export-csv", action="store_true", help="Export all assets to CSV")
+    parser.add_argument("--unmanaged-only", action="store_true", help="Export only unmanaged assets (with -e)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     args = parser.parse_args()
@@ -347,6 +641,9 @@ Examples:
 
     report = generate_report(instances, k8s_nodes, aks, sensor, args.output)
     print(report)
+
+    if args.export_csv:
+        export_assets_csv(cs, args.output or "assets_export.txt", args.unmanaged_only)
 
 
 if __name__ == "__main__":
