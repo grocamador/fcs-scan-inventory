@@ -111,17 +111,17 @@ def query_k8s_nodes(cs: CloudSecurityAssets) -> Dict:
 
 
 def query_sensor_installation(cs: CloudSecurityAssets) -> Dict[str, Dict[str, int]]:
-    """Query for sensor installation status across cloud providers."""
-    print("🔍 Querying sensor installation status...")
+    """Query for Managed by Sensor status across cloud providers."""
+    print("🔍 Querying Managed by Sensor status...")
 
     results = {
-        "ec2": {"installed": 0, "not_installed": 0},
-        "gcp": {"installed": 0, "not_installed": 0},
-        "azure": {"installed": 0, "not_installed": 0},
+        "ec2": {"managed": 0, "unmanaged": 0},
+        "gcp": {"managed": 0, "unmanaged": 0},
+        "azure": {"managed": 0, "unmanaged": 0},
     }
 
     try:
-        # EC2 instances with sensor status
+        # EC2 instances with managed status
         ec2_filter = 'service:"EC2"+instance_state:"running"'
         ec2_result = cs.query_assets(filter=ec2_filter, limit=100)
         if ec2_result.get("status_code") == 200:
@@ -131,14 +131,14 @@ def query_sensor_installation(cs: CloudSecurityAssets) -> Dict[str, Dict[str, in
                 if details.get("status_code") == 200:
                     assets = details.get("body", {}).get("resources", [])
                     for asset in assets:
-                        has_sensor = asset.get('cloud_context', {}).get('insights', {}).get('details', {}).get('enabledLoggingSources', {}).get('context', {}).get('hasSensor', False)
-                        if has_sensor:
-                            results["ec2"]["installed"] += 1
+                        managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
+                        if managed_by == "Managed":
+                            results["ec2"]["managed"] += 1
                         else:
-                            results["ec2"]["not_installed"] += 1
-                    print(f"  ✓ EC2: {results['ec2']['installed']} with sensor, {results['ec2']['not_installed']} without")
+                            results["ec2"]["unmanaged"] += 1
+                    print(f"  ✓ EC2: {results['ec2']['managed']} managed, {results['ec2']['unmanaged']} unmanaged")
 
-        # GCP instances with sensor status
+        # GCP instances with managed status
         gcp_filter = 'resource_type_name:"Compute Instance"+instance_state:"RUNNING"'
         gcp_result = cs.query_assets(filter=gcp_filter, limit=100)
         if gcp_result.get("status_code") == 200:
@@ -148,14 +148,14 @@ def query_sensor_installation(cs: CloudSecurityAssets) -> Dict[str, Dict[str, in
                 if details.get("status_code") == 200:
                     assets = details.get("body", {}).get("resources", [])
                     for asset in assets:
-                        has_sensor = asset.get('cloud_context', {}).get('insights', {}).get('details', {}).get('enabledLoggingSources', {}).get('context', {}).get('hasSensor', False)
-                        if has_sensor:
-                            results["gcp"]["installed"] += 1
+                        managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
+                        if managed_by == "Managed":
+                            results["gcp"]["managed"] += 1
                         else:
-                            results["gcp"]["not_installed"] += 1
-                    print(f"  ✓ GCP: {results['gcp']['installed']} with sensor, {results['gcp']['not_installed']} without")
+                            results["gcp"]["unmanaged"] += 1
+                    print(f"  ✓ GCP: {results['gcp']['managed']} managed, {results['gcp']['unmanaged']} unmanaged")
 
-        # Azure instances with sensor status
+        # Azure instances with managed status
         azure_filter = 'service:"Virtual Machines"+instance_state:"VM running"'
         azure_result = cs.query_assets(filter=azure_filter, limit=100)
         if azure_result.get("status_code") == 200:
@@ -165,17 +165,17 @@ def query_sensor_installation(cs: CloudSecurityAssets) -> Dict[str, Dict[str, in
                 if details.get("status_code") == 200:
                     assets = details.get("body", {}).get("resources", [])
                     for asset in assets:
-                        has_sensor = asset.get('cloud_context', {}).get('insights', {}).get('details', {}).get('enabledLoggingSources', {}).get('context', {}).get('hasSensor', False)
-                        if has_sensor:
-                            results["azure"]["installed"] += 1
+                        managed_by = asset.get('cloud_context', {}).get('host', {}).get('managed_by', 'Unmanaged')
+                        if managed_by == "Managed":
+                            results["azure"]["managed"] += 1
                         else:
-                            results["azure"]["not_installed"] += 1
-                    print(f"  ✓ Azure: {results['azure']['installed']} with sensor, {results['azure']['not_installed']} without")
+                            results["azure"]["unmanaged"] += 1
+                    print(f"  ✓ Azure: {results['azure']['managed']} managed, {results['azure']['unmanaged']} unmanaged")
 
         return results
 
     except Exception as e:
-        print(f"❌ Error querying sensor installation: {e}")
+        print(f"❌ Error querying Managed by Sensor status: {e}")
         sys.exit(1)
 
 
@@ -238,13 +238,13 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
-┌─ FALCON SENSOR INSTALLATION STATUS ─────────────────────────────────┐
+┌─ MANAGED BY SENSOR ─────────────────────────────────────────────────┐
 │                                                                      │
-│  AWS EC2:              {sensor['ec2']['installed']:>6} installed, {sensor['ec2']['not_installed']:>6} not installed
-│  GCP Compute:          {sensor['gcp']['installed']:>6} installed, {sensor['gcp']['not_installed']:>6} not installed
-│  Azure VMs:            {sensor['azure']['installed']:>6} installed, {sensor['azure']['not_installed']:>6} not installed
+│  AWS EC2:              {sensor['ec2']['managed']:>6} managed,   {sensor['ec2']['unmanaged']:>6} unmanaged
+│  GCP Compute:          {sensor['gcp']['managed']:>6} managed,   {sensor['gcp']['unmanaged']:>6} unmanaged
+│  Azure VMs:            {sensor['azure']['managed']:>6} managed,   {sensor['azure']['unmanaged']:>6} unmanaged
 │  ───────────────────────────────────                               │
-│  Total:                {sensor['ec2']['installed'] + sensor['gcp']['installed'] + sensor['azure']['installed']:>6} installed, {sensor['ec2']['not_installed'] + sensor['gcp']['not_installed'] + sensor['azure']['not_installed']:>6} not installed
+│  Total:                {sensor['ec2']['managed'] + sensor['gcp']['managed'] + sensor['azure']['managed']:>6} managed,   {sensor['ec2']['unmanaged'] + sensor['gcp']['unmanaged'] + sensor['azure']['unmanaged']:>6} unmanaged
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
@@ -253,7 +253,7 @@ Summary:
   • {total_k8s} running as Kubernetes nodes
   • {total_standalone} running standalone
   • Breakdown: EKS {k8s_nodes['eks']} | GKE {k8s_nodes['gke']} | AKS {aks['aks_nodes']}
-  • Sensor Coverage: {sensor['ec2']['installed'] + sensor['gcp']['installed'] + sensor['azure']['installed']} protected, {sensor['ec2']['not_installed'] + sensor['gcp']['not_installed'] + sensor['azure']['not_installed']} unprotected
+  • Managed by Sensor: {sensor['ec2']['managed'] + sensor['gcp']['managed'] + sensor['azure']['managed']} managed, {sensor['ec2']['unmanaged'] + sensor['gcp']['unmanaged'] + sensor['azure']['unmanaged']} unmanaged
 """
 
     if output_file:
@@ -274,8 +274,8 @@ Summary:
                 "eks_nodes": k8s_nodes['eks'],
                 "gke_nodes": k8s_nodes['gke'],
                 "aks_nodes": aks['aks_nodes'],
-                "sensor_installed": sensor['ec2']['installed'] + sensor['gcp']['installed'] + sensor['azure']['installed'],
-                "sensor_not_installed": sensor['ec2']['not_installed'] + sensor['gcp']['not_installed'] + sensor['azure']['not_installed']
+                "sensor_managed": sensor['ec2']['managed'] + sensor['gcp']['managed'] + sensor['azure']['managed'],
+                "sensor_unmanaged": sensor['ec2']['unmanaged'] + sensor['gcp']['unmanaged'] + sensor['azure']['unmanaged']
             }
         }
         json_file = output_file.replace(".txt", ".json")
